@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+# misc
+.DS_Store
+*.pem
+# debug
+npm-debug.log*
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local env files
+.env
+.env.local
+.env.build
+.env.development.local
+.env.test.local
+.env.production.locallogs/
+*.log
+venv/
+*.pyc
+__pycache__/
