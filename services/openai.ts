@@ -211,6 +211,47 @@ export async function generateCompletionStream(
 }
 
 /**
+ * Generate streaming completion with async generator
+ * Yields chunks as they arrive for real-time streaming
+ */
+export async function* generateStreamingCompletion(
+  messages: ChatMessage[],
+  options?: CompletionOptions
+): AsyncGenerator<string, void, unknown> {
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'sk-your-openai-key-here') {
+    throw new OpenAIError(
+      'OpenAI API key not configured. Please set OPENAI_API_KEY in .env file',
+      'MISSING_API_KEY'
+    );
+  }
+
+  try {
+    const stream = await openai.chat.completions.create({
+      model: options?.model || DEFAULT_MODEL,
+      messages: messages as any,
+      temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
+      max_tokens: options?.maxTokens || DEFAULT_MAX_TOKENS,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        yield content;
+      }
+    }
+  } catch (error: any) {
+    console.error('[OpenAI] Streaming error:', error);
+    throw new OpenAIError(
+      error.message || 'Streaming error',
+      error.code,
+      error.status,
+      error
+    );
+  }
+}
+
+/**
  * Extract facts from text content
  * Specialized prompt for fact extraction
  */
