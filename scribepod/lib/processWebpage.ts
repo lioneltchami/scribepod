@@ -1,9 +1,8 @@
 #!/usr/bin/env zx
 import fs from 'fs';
-import got from 'got'
 import 'zx/globals';
-import { v4 as uuidv4 } from 'uuid'
 import { JSDOM } from 'jsdom';
+import { extractFacts, generateDialogueFromFacts } from '../../services/openai';
 
 export interface WebsiteData {
   [webpage: string]: string[];
@@ -16,40 +15,8 @@ export interface WebsiteSummary {
 export interface Discussion {
   [webpage: string]: string[];
 }
-export interface ChatResponse {
-  response: string
-  conversationId: string
-  messageId: string
-}
 
 const FOLDER_PATH = './websites';
-const PROMPT_URL = 'http://localhost:3000/conversation';
-const SUMMARIZE_PROMPT = `
-Turn facts from the following section as a bullet list, retaining as much specific details as you can. For example
-- Fact 1 about the information
-- Fact 2 about the information
-`
-
-const FIRST_PODCAST_PROMPT = `
-  Could you simulate a podcast conversation between "Alice" and "Bob" having a conversation about the following facts? 
-  Some things I'd like to ask:
-  - Use "Alice:" and "Bob:" to indicate who is speaking. 
-  - Make the dialogue about this as long as possible.
-  - Alice is presenting the information, Bob is asking very intelligent questions that help Alice elaborate the facts.
-  Here's some of the facts from the paper. but do not end the conversation! I still have more facts I want to include in the dialgoue!
-`;
-const MIDDLE_PODCAST_PROMPT = `
- Continue the same podcast conversation with this next set of facts. Remember:
-  - Make the dialogue about this as long as possible.
-  - Alice is presenting the information, Bob is asking very intelligent questions that help Alice elaborate the facts.
-  Here's some more facts. Do not end the conversation! I still have more facts I want to include in the dialgoue!
-`;
-const LAST_PODCAST_PROMPT = `
- Continue this same podcast conversation. Remember;
-  - Make the dialogue about this as long as possible.
-  - Alice is presenting the information, Bob is asking very intelligent questions that help Alice elaborate the facts.
-  These are the last facts for the podcast discussion! Have them make some concluding remarks after talking about these facts, as the podcast is ending.
-`;
 
 export const getWebsiteData = async (folderPath: string): Promise<WebsiteData> => {
   const websiteData: WebsiteData = {};
@@ -97,51 +64,43 @@ export const splitPageIntoSections = (lines: string[], wordCountGoal: number): s
   return mergedLines;
 }
 
-export const promptGPT = async (text: string, title: string, oneshotPrompt: string, conversationId?: string, parentMessageId?: string): Promise<ChatResponse> => {
-  const prompt = `
-    ${oneshotPrompt} 
-    Title of topic: ${title}
-    ${text}
-  `;
-  const { body } = await got.post(PROMPT_URL, {
-    json: {
-      prompt,
-      conversationId,
-      parentMessageId,
-    }
-  });
-  const chatResponse: ChatResponse = JSON.parse(body);
-  console.log(chatResponse);
-  return chatResponse;
-}
-
 export const generateSummary = async (websiteData: WebsiteData, writeToDisk: boolean = true): Promise<WebsiteSummary> => {
-  const summarizedSites: WebsiteSummary = JSON.parse(fs.readFileSync(`./output/summaries.json`, 'utf8'));;
-  // read sumaries json, avaoid reprocessing the same sites
+  const summarizedSites: WebsiteSummary = JSON.parse(fs.readFileSync(`./output/summaries.json`, 'utf8'));
+
+  // Read summaries json, avoid reprocessing the same sites
   for (const [webpage, lines] of Object.entries(websiteData)) {
-    let conversationID;
-    let parentMessageID;
     if (summarizedSites.hasOwnProperty(webpage)) {
+      console.log(`[ProcessWebpage] Skipping ${webpage} - already processed`);
       continue;
     }
-    for (const line of lines) {
-      try {
-        const chatResponse = await promptGPT(line, webpage, SUMMARIZE_PROMPT, conversationID, parentMessageID);
-        const gptResponse = chatResponse.response;
-        conversationID = chatResponse.conversationId;
-        parentMessageID = chatResponse.messageId;
-        const points = gptResponse.split('\n').map((line) => line.trim()).filter((line) => line !== '');
-        summarizedSites[webpage] = [...(summarizedSites[webpage] || []), ...points];
-        if (writeToDisk) {
-          fs.writeFileSync(`./output/summaries.json`, JSON.stringify(summarizedSites, null, 2));
-        }
-      } catch (e) {
-        console.log(e);
-        // Avoid spamming the big altman
-        await sleep(2000);
+
+    console.log(`[ProcessWebpage] Processing ${webpage}...`);
+
+    // Combine all lines into one text block
+    const fullText = lines.join('\n');
+
+    try {
+      // Use new OpenAI service to extract facts
+      const facts = await extractFacts(fullText, webpage);
+
+      console.log(`[ProcessWebpage] Extracted ${facts.length} facts from ${webpage}`);
+
+      summarizedSites[webpage] = facts;
+
+      if (writeToDisk) {
+        fs.writeFileSync(`./output/summaries.json`, JSON.stringify(summarizedSites, null, 2));
+        console.log(`[ProcessWebpage] Saved summaries to disk`);
       }
+
+      // Small delay to avoid rate limiting
+      await sleep(1000);
+
+    } catch (e) {
+      console.error(`[ProcessWebpage] Error processing ${webpage}:`, e);
+      // Continue with next webpage
     }
   }
+
   return summarizedSites;
 }
 
@@ -157,46 +116,72 @@ function splitArray(array, n) {
 }
 
 
-// TODO, move the prompting logic up a layer
 export const generateDiscussion = async (
   summaries: WebsiteSummary,
   writeToDisk: boolean = true,
   splitsOnFacts: number = 7
 ): Promise<Discussion> => {
   const discussions: Discussion = JSON.parse(fs.readFileSync(`./output/discussions.json`, 'utf8'));
-  let conversationID;
-  let parentMessageID;
+
   for (const [title, summary] of Object.entries(summaries)) {
     if (discussions.hasOwnProperty(title)) {
+      console.log(`[ProcessWebpage] Skipping ${title} - dialogue already generated`);
       continue;
     }
-    console.log(`Processing ${title}... number of points: ${summary.length}`);
+
+    console.log(`[ProcessWebpage] Generating dialogue for ${title}... number of facts: ${summary.length}`);
+
+    // Split facts into chunks for better context management
     const summaryPoints = [...summary];
     const summaryPointsSplit = splitArray(summaryPoints, splitsOnFacts);
-    console.log(summaryPointsSplit);
+    console.log(`[ProcessWebpage] Split into ${summaryPointsSplit.length} chunks`);
+
     for (let i = 0; i < summaryPointsSplit.length; i++) {
-      const summaryPoint = summaryPointsSplit[i];
-      const summarySplitJoined = summaryPoint.join('\n');
-      const prompt = i === 0 ? FIRST_PODCAST_PROMPT : i === summaryPointsSplit.length - 1 ? LAST_PODCAST_PROMPT : MIDDLE_PODCAST_PROMPT;
+      const factChunk = summaryPointsSplit[i];
+      const isFirst = i === 0;
+      const isLast = i === summaryPointsSplit.length - 1;
+
+      console.log(`[ProcessWebpage] Processing chunk ${i + 1}/${summaryPointsSplit.length} (${factChunk.length} facts)...`);
+
       try {
-        const chatResponse = await promptGPT(summarySplitJoined, title, prompt, conversationID, parentMessageID);
-        parentMessageID = chatResponse.messageId;
-        conversationID = chatResponse.conversationId;
-        const gptResponse = chatResponse.response;
-        const speech = gptResponse.split('\n').map((line) => line.trim()).filter((line) => line !== '');
-        discussions[title] = [...(discussions[title] || []), ...speech];
+        // Use new OpenAI service to generate dialogue
+        const dialogue = await generateDialogueFromFacts(factChunk, {
+          title,
+          speakerA: 'Alice',
+          speakerB: 'Bob',
+          style: 'conversational',
+          isFirst,
+          isLast,
+        });
+
+        // Parse dialogue into lines
+        const dialogueLines = dialogue
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line !== '');
+
+        // Append to discussions
+        discussions[title] = [...(discussions[title] || []), ...dialogueLines];
+
+        console.log(`[ProcessWebpage] Generated ${dialogueLines.length} dialogue lines for chunk ${i + 1}`);
+
         if (writeToDisk) {
           fs.writeFileSync(`./output/discussions.json`, JSON.stringify(discussions, null, 2));
+          console.log(`[ProcessWebpage] Saved discussions to disk`);
         }
 
+        // Small delay to avoid rate limiting
+        await sleep(1000);
+
       } catch (e) {
-        console.log(e);
-        // Avoid spamming the big altman
+        console.error(`[ProcessWebpage] Error generating dialogue for ${title} chunk ${i + 1}:`, e);
+        // Wait longer on error to avoid rate limiting
         await sleep(10000);
       }
     }
 
-    break;
+    break; // Process one summary at a time
   }
+
   return discussions;
 }

@@ -1,0 +1,276 @@
+// Scribepod Database Schema
+// Multi-Guest Podcast Generator with AI-powered dialogue
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Content Management
+// -----------------------------------------------------------------------------
+
+enum SourceType {
+  PDF
+  HTML
+  TEXT
+  LATEX
+  DOCX
+  MARKDOWN
+  URL
+}
+
+model Content {
+  id          String   @id @default(uuid())
+  title       String
+  sourceType  SourceType
+  rawText     String   @db.Text
+  wordCount   Int
+  author      String?
+  sourceUrl   String?
+
+  // Metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Extracted facts and podcasts from this content
+  facts       Fact[]
+  podcasts    Podcast[]
+
+  @@index([title])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
+// Extracted facts from content
+model Fact {
+  id          String   @id @default(uuid())
+  contentId   String
+  text        String   @db.Text
+  importance  Float    @default(0.5) // 0-1 scale
+  category    String?
+  section     String?  // Source section in original content
+
+  createdAt   DateTime @default(now())
+
+  content     Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([contentId])
+  @@index([importance])
+}
+
+// -----------------------------------------------------------------------------
+// Podcast Generation
+// -----------------------------------------------------------------------------
+
+enum ConversationStyle {
+  CONVERSATIONAL
+  INTERVIEW
+  DEBATE
+  STORYTELLING
+  EDUCATIONAL
+}
+
+enum ProcessingStatus {
+  PENDING
+  PARSING
+  SUMMARIZING
+  GENERATING
+  SYNTHESIZING
+  COMPLETED
+  FAILED
+}
+
+model Podcast {
+  id              String            @id @default(uuid())
+  title           String
+  contentId       String
+  style           ConversationStyle @default(CONVERSATIONAL)
+  targetLength    Int               // Target length in minutes
+  status          ProcessingStatus  @default(PENDING)
+
+  // Metadata
+  includeIntro    Boolean           @default(true)
+  includeOutro    Boolean           @default(true)
+  totalWords      Int?
+  estimatedDuration Int?            // Seconds
+
+  // Processing info
+  progress        Int               @default(0) // 0-100
+  currentStep     String?
+  errorMessage    String?
+
+  // Timestamps
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  completedAt     DateTime?
+
+  // Relations
+  content         Content           @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  personas        PodcastPersona[]
+  dialogues       Dialogue[]
+  audioSegments   AudioSegment[]
+
+  @@index([contentId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// Persona Management
+// -----------------------------------------------------------------------------
+
+enum PersonaRole {
+  HOST
+  GUEST
+}
+
+enum VoiceProvider {
+  ELEVENLABS
+  PLAYHT
+  AZURE
+  GOOGLE
+}
+
+model Persona {
+  id              String    @id @default(uuid())
+  name            String    @unique
+  role            PersonaRole
+  bio             String    @db.Text
+  expertise       String[]  // Array of expertise areas
+
+  // Personality traits (0-1 scale)
+  formality       Float     @default(0.5)
+  enthusiasm      Float     @default(0.5)
+  humor           Float     @default(0.5)
+  expertiseLevel  Float     @default(0.5)
+  interruption    Float     @default(0.3)
+
+  // Speaking style
+  sentenceLength  String    @default("medium") // short, medium, long
+  vocabulary      String    @default("academic") // simple, academic, technical
+  expressiveness  String    @default("varied") // monotone, varied, dramatic
+  pace            String    @default("medium") // slow, medium, fast
+
+  // Voice configuration
+  voiceProvider   VoiceProvider?
+  voiceId         String?
+  voiceStability  Float?    @default(0.5) // 0-1
+  voiceSimilarity Float?    @default(0.75) // 0-1
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  podcasts        PodcastPersona[]
+  dialogues       Dialogue[]
+  audioSegments   AudioSegment[]
+
+  @@index([name])
+  @@index([role])
+}
+
+// Junction table for Podcast <-> Persona (many-to-many)
+model PodcastPersona {
+  id              String    @id @default(uuid())
+  podcastId       String
+  personaId       String
+  turnCount       Int       @default(0)
+  wordCount       Int       @default(0)
+  percentage      Float     @default(0.0)
+
+  podcast         Podcast   @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+  persona         Persona   @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  @@unique([podcastId, personaId])
+  @@index([podcastId])
+  @@index([personaId])
+}
+
+// -----------------------------------------------------------------------------
+// Dialogue & Audio
+// -----------------------------------------------------------------------------
+
+model Dialogue {
+  id              String    @id @default(uuid())
+  podcastId       String
+  personaId       String
+  turnNumber      Int       // Order in the conversation
+  text            String    @db.Text
+  timestamp       Int?      // Milliseconds from start
+  emotions        String[]  // e.g., ["enthusiastic", "thoughtful"]
+
+  createdAt       DateTime  @default(now())
+
+  podcast         Podcast   @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+  persona         Persona   @relation(fields: [personaId], references: [id])
+  audioSegment    AudioSegment?
+
+  @@unique([podcastId, turnNumber])
+  @@index([podcastId])
+  @@index([personaId])
+}
+
+enum AudioFormat {
+  MP3
+  WAV
+  OGG
+}
+
+model AudioSegment {
+  id              String      @id @default(uuid())
+  podcastId       String
+  dialogueId      String      @unique
+  personaId       String
+
+  audioPath       String?     // Path to generated audio file
+  duration        Int?        // Seconds
+  volume          Float       @default(1.0) // 0-1
+  format          AudioFormat @default(MP3)
+  bitrate         Int?        // kbps
+
+  createdAt       DateTime    @default(now())
+
+  podcast         Podcast     @relation(fields: [podcastId], references: [id], onDelete: Cascade)
+  dialogue        Dialogue    @relation(fields: [dialogueId], references: [id], onDelete: Cascade)
+  persona         Persona     @relation(fields: [personaId], references: [id])
+
+  @@index([podcastId])
+  @@index([dialogueId])
+}
+
+// -----------------------------------------------------------------------------
+// Processing & Analytics
+// -----------------------------------------------------------------------------
+
+model ProcessingJob {
+  id              String            @id @default(uuid())
+  jobType         String            // "fact_extraction", "dialogue_generation", "audio_synthesis"
+  podcastId       String?
+  status          ProcessingStatus  @default(PENDING)
+  progress        Int               @default(0) // 0-100
+
+  // Details
+  inputData       String?           @db.Text
+  outputData      String?           @db.Text
+  errorMessage    String?           @db.Text
+  retryCount      Int               @default(0)
+  maxRetries      Int               @default(3)
+
+  // Timing
+  startedAt       DateTime?
+  completedAt     DateTime?
+  estimatedTime   Int?              // Seconds remaining
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([status])
+  @@index([jobType])
+  @@index([createdAt])
+}
