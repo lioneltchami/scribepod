@@ -1,6 +1,7 @@
 // Source: https://github.com/mdn/dom-examples/tree/main/media/web-dictaphonea
 // This code is bad on purpose
 import './index.css'; // TODO: Actually make this a sane typescrcipt babel setup
+import config from './config';
 
 
 const INTERVAL = 1000;
@@ -66,9 +67,9 @@ function visualize(stream: any) {
 }
 
 const postSilenceDetect = async (): Promise<string> => {
-  // send a get request to 4200/silence_detect
+  // send a get request to silence_detect endpoint
   console.log('spacekey')
-  const response = await fetch(`http://0.0.0.0:4200/silence_detect`, { method: "GET" });
+  const response = await config.fetchWithTimeout(config.getUrl('silenceDetect'), { method: "GET" });
   let responseText = '';
   if (response.status === 200) {
     responseText = await response.text();
@@ -99,10 +100,10 @@ const postAudioDataToReason = async (blob: Blob, chunkNumber: number): Promise<a
   formData.append("audio_data", blob, 'temp_recording');
   console.log(formData);
   console.log(blob);
-  const response = await fetch(`http://0.0.0.0:4200/conversation?chunk=${chunkNumber}`, {
+  const url = `${config.getUrl('conversation')}?chunk=${chunkNumber}`;
+  const response = await config.fetchWithTimeout(url, {
     method: "POST",
-    body:
-      formData,
+    body: formData,
     headers: myHeaders
   });
   if (response.status === 200) {
@@ -128,11 +129,18 @@ const main = async () => {
   let semaphore = true;
 
   mediaRecorder.ondataavailable = async (e) => {
+    // FIXED: Check semaphore BEFORE processing to prevent race conditions
+    if (!semaphore) {
+      console.log('[Audio] Skipping chunk - processing in progress');
+      return; // Skip this event if already processing
+    }
+
     const currentBlob = e.data;
     chunks.push(currentBlob);
-    if (currentBlob.size > 5000 && semaphore) { // bug
-      const blob = new Blob(chunks, { 'type': 'audio/ogg; codecs=opus' });
 
+    // Only process if chunk is large enough
+    if (currentBlob.size > 5000) {
+      const blob = new Blob(chunks, { 'type': 'audio/ogg; codecs=opus' });
 
       semaphore = false;
       let transcribedText;
@@ -142,10 +150,12 @@ const main = async () => {
 
         updateResponse('>' + JSON.stringify(response.conversationState, null, 2));
       } catch (e) {
-        throw e;
+        console.error('[Audio] Error during transcription:', e);
+        // Don't throw - just log and reset semaphore
       } finally {
         semaphore = true;
       }
+
       if (chunks.length >= FLUSH) {
         chunks = [];
         transcribedTextState[transcribedTextState.length - 1] = transcribedText;

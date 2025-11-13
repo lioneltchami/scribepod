@@ -230,40 +230,7 @@ example_1_inferences = person_speech + question_inference + \
 example_1_intent = person_speech + question_intent + \
     ["Answer: The intent of the person is: to start conversation about space exploration and colonizing Mars"]
 
-def build_state(world_state, conversation):
-    prompt = ['Infer some more state about the preceding speaker, do it in JSON. Add to the current state already inferred']
-    question = ['Q: What other qualities about the conversation can we infer?']
-    answer_line = ['So we already know that' + world_state + ' An additional thing we can infer from the conversation is that']
-    input_text = '\n'.join(conversation + prompt +
-                            question + answer_line)
-    input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(get_device())
-    outputs = text_model.generate(input_ids, max_length=2000, temperature=STATE_TEMPERATURE)
-    world_state = tokenizer.decode(outputs[0]).split('<pad>')[
-        1].split('</s')[0]
-    return world_state
-
-def get_persons_intent(question_speech):
-    prompt = example_1_intent + ['\nEXAMPLE 2:'] + question_speech + \
-        question_intent + ['Answer: The intent of this person is:']
-    input_text = '\n'.join(prompt)
-    input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(get_device())
-    outputs = text_model.generate(input_ids, max_length=2000, temperature=PERSON_INTENT_TEMPERATURE)
-    intent_of_person = tokenizer.decode(outputs[0]).split('<pad>')[
-        1].split('</s')[0]
-    return intent_of_person
-
-def get_inference_about_person(question_speech):
-    prompt = example_1_inferences + \
-        ['\nEXAMPLE 2:'] + question_speech + \
-        question_inference + ['Answer: This person is:']
-    input_text = '\n'.join(prompt)
-    input_ids = tokenizer(input_text, return_tensors="pt",
-                          padding='do_not_pad').input_ids.to(get_device())
-    outputs = text_model.generate(input_ids, max_length=2000, temperature=PERSON_INFERENCE_TEMPERATURE)
-    inference_about_person = tokenizer.decode(
-        outputs[0]).split('<pad>')[1].split('</s')[0]
-    return inference_about_person
-
+# Duplicate functions removed - keeping the improved versions below
 
 def build_state(world_state, conversation):
     prompt = ['Infer some more state about the preceding speaker. "Person" is speaking to a bot. Youre the bot.']
