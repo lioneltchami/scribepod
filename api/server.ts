@@ -37,6 +37,18 @@ import {
   getCurrentPersona,
   getSessionPersonas,
 } from '../services/conversationManager';
+import {
+  getPresetCombination,
+  getPresetKeys,
+  getAllPresets,
+  getDefaultPersonaIds,
+  getPresetPersonaIds,
+  resolvePersonaIds,
+  listAvailablePersonas,
+  getRecommendedPreset,
+  areDefaultPersonasSeeded,
+} from '../services/personaLibrary';
+import { getDefaultPersona, getAllDefaultPersonas, getRecommendedPersonas } from '../services/defaultPersonas';
 
 // Initialize Express app
 const app = express();
@@ -284,17 +296,31 @@ app.get('/api/podcasts/:id', async (req: Request, res: Response) => {
 // Generate podcast from string
 app.post('/api/podcasts/generate/string', async (req: Request, res: Response) => {
   try {
-    const { text, title, sourceType, personaIds, podcastTitle, targetLength, podcastStyle } = req.body;
+    const { text, title, sourceType, personaIds, preset, useDefaults, podcastTitle, targetLength, podcastStyle } = req.body;
 
-    if (!text || !title || !sourceType || !personaIds || personaIds.length < 2) {
+    if (!text || !title || !sourceType) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields or insufficient personas (minimum 2)',
+        error: 'Missing required fields: text, title, sourceType',
+      });
+    }
+
+    // Resolve persona IDs using preset/defaults if not explicitly provided
+    const resolvedPersonaIds = await resolvePersonaIds({
+      personaIds,
+      preset,
+      useDefaults,
+    });
+
+    if (resolvedPersonaIds.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least 2 personas required. Provide personaIds, preset, or set useDefaults=true',
       });
     }
 
     const result = await generatePodcastFromString(text, title, sourceType, {
-      personaIds,
+      personaIds: resolvedPersonaIds,
       podcastTitle,
       targetLength,
       podcastStyle,
@@ -306,6 +332,7 @@ app.post('/api/podcasts/generate/string', async (req: Request, res: Response) =>
         podcast: result.podcast,
         content: result.content,
         status: result.status,
+        personasUsed: resolvedPersonaIds,
         jobs: {
           factExtraction: result.jobs.factExtraction?.id,
           dialogueGeneration: result.jobs.dialogueGeneration?.id,
@@ -323,17 +350,31 @@ app.post('/api/podcasts/generate/string', async (req: Request, res: Response) =>
 // Generate podcast from URL
 app.post('/api/podcasts/generate/url', async (req: Request, res: Response) => {
   try {
-    const { url, personaIds, podcastTitle, targetLength, podcastStyle } = req.body;
+    const { url, personaIds, preset, useDefaults, podcastTitle, targetLength, podcastStyle } = req.body;
 
-    if (!url || !personaIds || personaIds.length < 2) {
+    if (!url) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields or insufficient personas (minimum 2)',
+        error: 'Missing required field: url',
+      });
+    }
+
+    // Resolve persona IDs using preset/defaults if not explicitly provided
+    const resolvedPersonaIds = await resolvePersonaIds({
+      personaIds,
+      preset,
+      useDefaults,
+    });
+
+    if (resolvedPersonaIds.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least 2 personas required. Provide personaIds, preset, or set useDefaults=true',
       });
     }
 
     const result = await generatePodcastFromURL(url, {
-      personaIds,
+      personaIds: resolvedPersonaIds,
       podcastTitle,
       targetLength,
       podcastStyle,
@@ -345,6 +386,7 @@ app.post('/api/podcasts/generate/url', async (req: Request, res: Response) => {
         podcast: result.podcast,
         content: result.content,
         status: result.status,
+        personasUsed: resolvedPersonaIds,
       },
     });
   } catch (error) {
@@ -449,6 +491,184 @@ app.post('/api/personas', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to create persona',
+    });
+  }
+});
+
+// ==============================================================================
+// Persona Library & Presets (Phase 3: Default Personas)
+// ==============================================================================
+
+// Get all available personas with metadata
+app.get('/api/personas/library', async (req: Request, res: Response) => {
+  try {
+    const personas = await listAvailablePersonas();
+
+    res.json({
+      success: true,
+      data: personas,
+      count: personas.length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get persona library',
+    });
+  }
+});
+
+// Check if default personas are seeded
+app.get('/api/personas/defaults/status', async (req: Request, res: Response) => {
+  try {
+    const isSeeded = await areDefaultPersonasSeeded();
+
+    res.json({
+      success: true,
+      data: {
+        seeded: isSeeded,
+        message: isSeeded
+          ? 'Default personas are available'
+          : 'Default personas not seeded. Run: npm run prisma:seed',
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to check default personas',
+    });
+  }
+});
+
+// Get default persona IDs
+app.get('/api/personas/defaults', async (req: Request, res: Response) => {
+  try {
+    const defaultIds = await getDefaultPersonaIds();
+
+    if (defaultIds.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Default personas not found. Please seed the database: npm run prisma:seed',
+      });
+    }
+
+    // Get full persona details
+    const personas = [];
+    for (const id of defaultIds) {
+      const persona = await db.getPersonaById(id);
+      if (persona) personas.push(persona);
+    }
+
+    res.json({
+      success: true,
+      data: personas,
+      count: personas.length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get default personas',
+    });
+  }
+});
+
+// Get all preset combinations
+app.get('/api/personas/presets', async (req: Request, res: Response) => {
+  try {
+    const presets = getAllPresets();
+    const presetKeys = getPresetKeys();
+
+    res.json({
+      success: true,
+      data: presets,
+      keys: presetKeys,
+      count: presets.length,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get presets',
+    });
+  }
+});
+
+// Get specific preset combination
+app.get('/api/personas/presets/:key', async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    const preset = getPresetCombination(key);
+
+    if (!preset) {
+      return res.status(404).json({
+        success: false,
+        error: `Preset '${key}' not found`,
+      });
+    }
+
+    // Get persona IDs for this preset
+    const personaIds = await getPresetPersonaIds(key);
+
+    // Get full persona details
+    const personas = [];
+    for (const id of personaIds) {
+      const persona = await db.getPersonaById(id);
+      if (persona) personas.push(persona);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        preset,
+        personas,
+        personaIds,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get preset',
+    });
+  }
+});
+
+// Get recommended preset for content
+app.post('/api/personas/recommend', async (req: Request, res: Response) => {
+  try {
+    const { contentHint, contentType } = req.body;
+
+    const hint = contentHint || contentType || '';
+    const recommendedPresetKey = getRecommendedPreset(hint);
+    const preset = getPresetCombination(recommendedPresetKey);
+
+    if (!preset) {
+      return res.status(404).json({
+        success: false,
+        error: 'Failed to get recommendation',
+      });
+    }
+
+    // Get persona IDs for recommended preset
+    const personaIds = await getPresetPersonaIds(recommendedPresetKey);
+
+    // Get full persona details
+    const personas = [];
+    for (const id of personaIds) {
+      const persona = await db.getPersonaById(id);
+      if (persona) personas.push(persona);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        recommendedPreset: recommendedPresetKey,
+        preset,
+        personas,
+        personaIds,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get recommendation',
     });
   }
 });
