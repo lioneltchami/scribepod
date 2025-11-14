@@ -5,11 +5,11 @@
 
 import OpenAI from 'openai';
 import pRetry from 'p-retry';
-import dotenv from 'dotenv';
+import { config as dotenvConfig } from 'dotenv';
 import type { ChatMessage, CompletionOptions } from '../shared/types';
 
 // Load environment variables
-dotenv.config();
+dotenvConfig();
 
 // Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;

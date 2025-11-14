@@ -3,8 +3,8 @@
  * Multi-persona podcast dialogue with personality-driven conversations
  */
 
-import { generateCompletion, type ChatMessage } from './openai';
-import type { Persona } from '../generated/prisma';
+import { generateCompletion } from './openai';
+import type { Persona, ChatMessage } from '../shared/types';
 
 export class DialogueGeneratorError extends Error {
   constructor(message: string, public originalError?: any) {

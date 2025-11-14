@@ -5,7 +5,7 @@
  */
 
 import { generateCompletion, generateStreamingCompletion } from './openai';
-import type { Persona } from '@prisma/client';
+import type { Persona, ChatMessage } from '../shared/types';
 
 // ============================================================================
 // Types and Interfaces
@@ -133,12 +133,12 @@ export function personaToConversationProfile(persona: Persona): ConversationPers
     id: persona.id,
     name: persona.name,
     role: persona.role,
-    background: persona.background || 'Podcast participant',
+    background: persona.bio || 'Podcast participant',
     personality: {
       formality: persona.formality,
       enthusiasm: persona.enthusiasm,
       humor: persona.humor,
-      expertise: persona.expertise,
+      expertise: persona.expertiseLevel,
     },
     speakingStyle: {
       sentenceLength: persona.sentenceLength as 'short' | 'medium' | 'long',
@@ -264,7 +264,7 @@ export async function generatePersonaResponse(
   }
 
   // Build conversation history
-  const messages: Array<{ role: string; content: string }> = [];
+  const messages: ChatMessage[] = [];
 
   // Add system prompt
   const systemPrompt = generateConversationSystemPrompt(persona, context);
@@ -333,7 +333,7 @@ export async function* generatePersonaStreamingResponse(
   }
 
   // Build conversation history
-  const messages: Array<{ role: string; content: string }> = [];
+  const messages: ChatMessage[] = [];
 
   // Add system prompt
   const systemPrompt = generateConversationSystemPrompt(persona, context);
@@ -400,7 +400,7 @@ export async function generatePersonaGreeting(
 ): Promise<string> {
   const systemPrompt = generateConversationSystemPrompt(persona, context);
 
-  const messages = [
+  const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
