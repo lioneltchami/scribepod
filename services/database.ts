@@ -3,7 +3,16 @@
  * Centralized database access layer using Prisma Client
  */
 
-import { PrismaClient, Prisma } from '../generated/prisma';
+import {
+  PrismaClient,
+  Prisma,
+  SourceType,
+  ConversationStyle,
+  ProcessingStatus,
+  PersonaRole,
+  VoiceProvider,
+  AudioFormat,
+} from '../generated/prisma';
 import type {
   Content,
   Fact,
@@ -74,7 +83,7 @@ export async function healthCheck(): Promise<boolean> {
 
 export interface CreateContentInput {
   title: string;
-  sourceType: Prisma.SourceType;
+  sourceType: SourceType;
   rawText: string;
   wordCount: number;
   author?: string;
@@ -181,7 +190,7 @@ export async function getFactsByContentId(contentId: string): Promise<Fact[]> {
 export interface CreatePodcastInput {
   title: string;
   contentId: string;
-  style?: Prisma.ConversationStyle;
+  style?: ConversationStyle;
   targetLength: number;
   includeIntro?: boolean;
   includeOutro?: boolean;
@@ -223,7 +232,7 @@ export async function getPodcastById(id: string): Promise<Podcast | null> {
 
 export async function updatePodcastStatus(
   id: string,
-  status: Prisma.ProcessingStatus,
+  status: ProcessingStatus,
   progress?: number,
   currentStep?: string,
   errorMessage?: string
@@ -272,7 +281,7 @@ export async function listPodcasts(limit: number = 50, offset: number = 0): Prom
 
 export interface CreatePersonaInput {
   name: string;
-  role: Prisma.PersonaRole;
+  role: PersonaRole;
   bio: string;
   expertise: string[];
   formality?: number;
@@ -284,7 +293,7 @@ export interface CreatePersonaInput {
   vocabulary?: string;
   expressiveness?: string;
   pace?: string;
-  voiceProvider?: Prisma.VoiceProvider;
+  voiceProvider?: VoiceProvider;
   voiceId?: string;
   voiceStability?: number;
   voiceSimilarity?: number;
@@ -407,7 +416,7 @@ export interface CreateAudioSegmentInput {
   audioPath?: string;
   duration?: number;
   volume?: number;
-  format?: Prisma.AudioFormat;
+  format?: AudioFormat;
   bitrate?: number;
 }
 
@@ -460,7 +469,7 @@ export async function createProcessingJob(data: CreateProcessingJobInput): Promi
 export async function updateProcessingJob(
   id: string,
   data: {
-    status?: Prisma.ProcessingStatus;
+    status?: ProcessingStatus;
     progress?: number;
     outputData?: string;
     errorMessage?: string;

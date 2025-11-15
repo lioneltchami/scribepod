@@ -1,103 +1,93 @@
 /**
  * Database Seed Script
- * Populates database with sample data for development and testing
+ * Populates database with default personas and sample data
  */
 
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient, PersonaRole } from '../generated/prisma';
+import { DEFAULT_PERSONAS, getAllDefaultPersonas } from '../services/defaultPersonas';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  console.log('🌱 Starting database seed...\n');
+/**
+ * Seed default personas
+ */
+async function seedDefaultPersonas() {
+  console.log('🎭 Seeding default personas...\n');
 
-  // Clean existing data (optional - comment out if you want to preserve data)
-  console.log('Cleaning existing data...');
-  await prisma.audioSegment.deleteMany();
-  await prisma.dialogue.deleteMany();
-  await prisma.podcastPersona.deleteMany();
-  await prisma.podcast.deleteMany();
-  await prisma.fact.deleteMany();
-  await prisma.content.deleteMany();
-  await prisma.persona.deleteMany();
-  await prisma.processingJob.deleteMany();
-  console.log('✓ Cleaned existing data\n');
+  const defaultPersonas = getAllDefaultPersonas();
+  const createdPersonas: any[] = [];
 
-  // Create Personas
-  console.log('Creating personas...');
+  for (const defaultPersona of defaultPersonas) {
+    // Check if persona already exists
+    const existing = await prisma.persona.findUnique({
+      where: { name: defaultPersona.name },
+    });
 
-  const alice = await prisma.persona.create({
-    data: {
-      name: 'Alice',
-      role: 'HOST',
-      bio: 'Alice is an experienced podcast host with a background in science communication. She has a talent for making complex topics accessible to general audiences while maintaining intellectual rigor.',
-      expertise: ['Science Communication', 'Interviewing', 'Education', 'Technology'],
-      formality: 0.6,
-      enthusiasm: 0.8,
-      humor: 0.7,
-      expertiseLevel: 0.8,
-      interruption: 0.2,
-      sentenceLength: 'medium',
-      vocabulary: 'academic',
-      expressiveness: 'varied',
-      pace: 'medium',
-      voiceProvider: 'ELEVENLABS',
-      voiceId: 'alice-voice-id',
-      voiceStability: 0.7,
-      voiceSimilarity: 0.8,
-    },
+    if (existing) {
+      console.log(`  ⏭️  ${defaultPersona.name} already exists (skipping)`);
+      createdPersonas.push(existing);
+      continue;
+    }
+
+    // Create new persona
+    const persona = await prisma.persona.create({
+      data: {
+        name: defaultPersona.name,
+        role: defaultPersona.role as PersonaRole,
+        bio: defaultPersona.bio,
+        expertise: defaultPersona.expertise,
+        formality: defaultPersona.formality,
+        enthusiasm: defaultPersona.enthusiasm,
+        humor: defaultPersona.humor,
+        expertiseLevel: defaultPersona.expertiseLevel,
+        interruption: defaultPersona.interruption,
+        sentenceLength: defaultPersona.sentenceLength,
+        vocabulary: defaultPersona.vocabulary,
+        expressiveness: defaultPersona.expressiveness,
+        pace: defaultPersona.pace,
+        // Default voice settings (can be customized later)
+        voiceProvider: 'ELEVENLABS',
+        voiceId: `${defaultPersona.name.toLowerCase().replace(/\s+/g, '-')}-voice`,
+        voiceStability: 0.7,
+        voiceSimilarity: 0.8,
+      },
+    });
+
+    console.log(`  ✓ Created ${persona.name} (${persona.role}) - ${defaultPersona.description}`);
+    createdPersonas.push(persona);
+  }
+
+  console.log(`\n✅ Default personas seeded: ${createdPersonas.length}/${defaultPersonas.length}\n`);
+  return createdPersonas;
+}
+
+/**
+ * Seed sample content and podcast (for testing/demo)
+ */
+async function seedSampleContent(personas: any[]) {
+  console.log('📄 Seeding sample content...\n');
+
+  // Get default personas for the sample podcast (Sarah + Marcus)
+  const sarah = personas.find((p) => p.name === 'Sarah Chen');
+  const marcus = personas.find((p) => p.name === 'Marcus Thompson');
+  const emily = personas.find((p) => p.name === 'Dr. Emily Rivera');
+
+  if (!sarah || !marcus || !emily) {
+    console.log('⚠️  Default personas not found, skipping sample content');
+    return;
+  }
+
+  // Check if sample content already exists
+  const existingContent = await prisma.content.findFirst({
+    where: { title: 'The History and Impact of Artificial Intelligence' },
   });
 
-  const bob = await prisma.persona.create({
-    data: {
-      name: 'Bob',
-      role: 'GUEST',
-      bio: 'Bob is a curious learner who asks insightful questions. He represents the intelligent layperson audience, helping to draw out explanations and clarifications that benefit all listeners.',
-      expertise: ['Critical Thinking', 'Philosophy', 'History', 'General Knowledge'],
-      formality: 0.5,
-      enthusiasm: 0.7,
-      humor: 0.6,
-      expertiseLevel: 0.6,
-      interruption: 0.4,
-      sentenceLength: 'short',
-      vocabulary: 'simple',
-      expressiveness: 'varied',
-      pace: 'medium',
-      voiceProvider: 'ELEVENLABS',
-      voiceId: 'bob-voice-id',
-      voiceStability: 0.6,
-      voiceSimilarity: 0.75,
-    },
-  });
-
-  const carol = await prisma.persona.create({
-    data: {
-      name: 'Carol',
-      role: 'GUEST',
-      bio: 'Carol is a technical expert who brings deep domain knowledge. She can dive into technical details when appropriate but is skilled at explaining complex concepts clearly.',
-      expertise: ['Computer Science', 'AI/ML', 'Mathematics', 'Research'],
-      formality: 0.7,
-      enthusiasm: 0.6,
-      humor: 0.4,
-      expertiseLevel: 0.9,
-      interruption: 0.3,
-      sentenceLength: 'long',
-      vocabulary: 'technical',
-      expressiveness: 'monotone',
-      pace: 'slow',
-      voiceProvider: 'PLAYHT',
-      voiceId: 'carol-voice-id',
-      voiceStability: 0.8,
-      voiceSimilarity: 0.7,
-    },
-  });
-
-  console.log(`✓ Created ${alice.name} (${alice.role})`);
-  console.log(`✓ Created ${bob.name} (${bob.role})`);
-  console.log(`✓ Created ${carol.name} (${carol.role})\n`);
+  if (existingContent) {
+    console.log('⏭️  Sample content already exists (skipping)\n');
+    return;
+  }
 
   // Create Sample Content
-  console.log('Creating sample content...');
-
   const content = await prisma.content.create({
     data: {
       title: 'The History and Impact of Artificial Intelligence',
@@ -133,11 +123,9 @@ async function main() {
     },
   });
 
-  console.log(`✓ Created content: "${content.title}"\n`);
+  console.log(`✓ Created content: "${content.title}"`);
 
   // Create Facts from Content
-  console.log('Creating facts...');
-
   const facts = await prisma.fact.createMany({
     data: [
       {
@@ -199,11 +187,9 @@ async function main() {
     ],
   });
 
-  console.log(`✓ Created ${facts.count} facts\n`);
+  console.log(`✓ Created ${facts.count} facts`);
 
   // Create Podcast
-  console.log('Creating podcast...');
-
   const podcast = await prisma.podcast.create({
     data: {
       title: 'The AI Revolution: Past, Present, and Future',
@@ -221,30 +207,28 @@ async function main() {
     },
   });
 
-  console.log(`✓ Created podcast: "${podcast.title}"\n`);
+  console.log(`✓ Created podcast: "${podcast.title}"`);
 
-  // Associate Personas with Podcast
-  console.log('Associating personas with podcast...');
-
+  // Associate Personas with Podcast (using default personas)
   await prisma.podcastPersona.createMany({
     data: [
       {
         podcastId: podcast.id,
-        personaId: alice.id,
+        personaId: sarah.id,
         turnCount: 12,
         wordCount: 1200,
         percentage: 48.0,
       },
       {
         podcastId: podcast.id,
-        personaId: bob.id,
+        personaId: marcus.id,
         turnCount: 8,
         wordCount: 800,
         percentage: 32.0,
       },
       {
         podcastId: podcast.id,
-        personaId: carol.id,
+        personaId: emily.id,
         turnCount: 5,
         wordCount: 500,
         percentage: 20.0,
@@ -252,51 +236,73 @@ async function main() {
     ],
   });
 
-  console.log('✓ Associated all personas with podcast\n');
+  console.log('✓ Associated personas with podcast');
 
   // Create Sample Dialogues
-  console.log('Creating sample dialogues...');
-
   const dialogues = [
     {
       podcastId: podcast.id,
-      personaId: alice.id,
+      personaId: sarah.id,
       turnNumber: 1,
-      text: 'Welcome to another episode! Today we\'re diving into the fascinating history and impact of artificial intelligence. I\'m joined by Bob and Carol to explore this transformative technology.',
+      text: 'Welcome to another episode! Today we\'re diving into the fascinating history and impact of artificial intelligence. I\'m joined by Marcus and Dr. Emily Rivera to explore this transformative technology.',
       timestamp: 0,
       emotions: ['enthusiastic', 'welcoming'],
     },
     {
       podcastId: podcast.id,
-      personaId: bob.id,
+      personaId: marcus.id,
       turnNumber: 2,
-      text: 'Thanks Alice! I\'ve always been curious about AI. When did it all really begin?',
+      text: 'Thanks Sarah! AI is such a rich topic with so much history. When did it all really begin?',
       timestamp: 15000,
       emotions: ['curious', 'engaged'],
     },
     {
       podcastId: podcast.id,
-      personaId: carol.id,
+      personaId: emily.id,
       turnNumber: 3,
-      text: 'Great question. The field officially started in 1956 at the Dartmouth Conference, where John McCarthy coined the term "artificial intelligence." But the seeds were planted much earlier.',
+      text: 'Great question. The field officially started in 1956 at the Dartmouth Conference, where John McCarthy coined the term "artificial intelligence." But the theoretical foundations were laid much earlier.',
       timestamp: 22000,
       emotions: ['thoughtful', 'informative'],
     },
     {
       podcastId: podcast.id,
-      personaId: alice.id,
+      personaId: sarah.id,
       turnNumber: 4,
-      text: 'What were researchers working on back then? It must have been very different from today\'s AI.',
+      text: 'What were researchers working on back then? It must have been very different from today\'s AI!',
       timestamp: 38000,
-      emotions: ['curious', 'analytical'],
+      emotions: ['curious', 'enthusiastic'],
     },
     {
       podcastId: podcast.id,
-      personaId: carol.id,
+      personaId: emily.id,
       turnNumber: 5,
-      text: 'Absolutely. Early AI focused on symbolic reasoning and problem-solving. Allen Newell and Herbert Simon developed the Logic Theorist, one of the first AI programs. It was quite revolutionary for its time.',
+      text: 'Absolutely. Early AI focused on symbolic reasoning and problem-solving. Allen Newell and Herbert Simon developed the Logic Theorist, one of the first AI programs. It could prove mathematical theorems - quite revolutionary for its time.',
       timestamp: 45000,
-      emotions: ['informative', 'historical'],
+      emotions: ['informative', 'analytical'],
+    },
+    {
+      podcastId: podcast.id,
+      personaId: marcus.id,
+      turnNumber: 6,
+      text: 'I\'ve heard about "AI winters" - what were those about?',
+      timestamp: 65000,
+      emotions: ['curious', 'thoughtful'],
+    },
+    {
+      podcastId: podcast.id,
+      personaId: emily.id,
+      turnNumber: 7,
+      text: 'AI winters were periods when progress slowed and funding dried up. Expectations had been set too high, and when systems couldn\'t deliver, investors and governments pulled back. But researchers persevered.',
+      timestamp: 72000,
+      emotions: ['serious', 'historical'],
+    },
+    {
+      podcastId: podcast.id,
+      personaId: sarah.id,
+      turnNumber: 8,
+      text: 'Fast forward to today - what changed? How did we go from AI winters to the AI revolution we\'re seeing now?',
+      timestamp: 90000,
+      emotions: ['enthusiastic', 'curious'],
     },
   ];
 
@@ -304,11 +310,9 @@ async function main() {
     await prisma.dialogue.create({ data: dialogue });
   }
 
-  console.log(`✓ Created ${dialogues.length} dialogue turns\n`);
+  console.log(`✓ Created ${dialogues.length} dialogue turns`);
 
   // Create Processing Job Example
-  console.log('Creating sample processing job...');
-
   const job = await prisma.processingJob.create({
     data: {
       jobType: 'dialogue_generation',
@@ -322,21 +326,57 @@ async function main() {
     },
   });
 
-  console.log(`✓ Created processing job: ${job.jobType}\n`);
+  console.log(`✓ Created processing job: ${job.jobType}`);
 
-  console.log('✅ Database seeding completed successfully!');
-  console.log('\nCreated:');
-  console.log(`  - 3 Personas (${alice.name}, ${bob.name}, ${carol.name})`);
-  console.log(`  - 1 Content (${content.title})`);
-  console.log(`  - ${facts.count} Facts`);
-  console.log(`  - 1 Podcast (${podcast.title})`);
-  console.log(`  - ${dialogues.length} Dialogue turns`);
-  console.log(`  - 1 Processing job\n`);
+  console.log('\n✅ Sample content seeded successfully!\n');
 }
 
+/**
+ * Main seeding function
+ */
+async function main() {
+  console.log('🌱 Starting database seed...\n');
+  console.log('=' .repeat(60));
+  console.log('SCRIBEPOD - Default Personas & Sample Data Seeder');
+  console.log('=' .repeat(60) + '\n');
+
+  try {
+    // Seed default personas (8 curated personas)
+    const personas = await seedDefaultPersonas();
+
+    // Seed sample content and podcast for demo/testing
+    await seedSampleContent(personas);
+
+    console.log('=' .repeat(60));
+    console.log('✅ Database seeding completed successfully!');
+    console.log('=' .repeat(60) + '\n');
+
+    console.log('Summary:');
+    console.log(`  ✓ ${personas.length} Default personas`);
+    console.log('  ✓ Sample content (AI History)');
+    console.log('  ✓ Sample podcast with dialogues');
+    console.log('  ✓ Processing job example\n');
+
+    console.log('Default Personas:');
+    personas.forEach((p) => {
+      const defaultData = DEFAULT_PERSONAS[Object.keys(DEFAULT_PERSONAS).find(
+        key => DEFAULT_PERSONAS[key].name === p.name
+      )!];
+      if (defaultData) {
+        console.log(`  • ${p.name} (${p.role}) - ${defaultData.description}`);
+      }
+    });
+    console.log('');
+
+  } catch (error) {
+    console.error('\n❌ Error during seeding:');
+    throw error;
+  }
+}
+
+// Execute seeding
 main()
   .catch((e) => {
-    console.error('❌ Error during seeding:');
     console.error(e);
     process.exit(1);
   })
