@@ -7,6 +7,9 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config as dotenvConfig } from 'dotenv';
+import multer from 'multer';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Load environment variables
 dotenvConfig();
@@ -53,6 +56,47 @@ import { getDefaultPersona, getAllDefaultPersonas, getRecommendedPersonas } from
 // Initialize Express app
 const app = express();
 const PORT = process.env.API_PORT || 3001;
+
+// ==============================================================================
+// File Upload Configuration
+// ==============================================================================
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename: timestamp_originalname
+    const uniqueSuffix = `${Date.now()}_${Math.round(Math.random() * 1E9)}`;
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    cb(null, `${basename}_${uniqueSuffix}${ext}`);
+  }
+});
+
+const fileFilter = (req: any, file: any, cb: multer.FileFilterCallback) => {
+  // Only accept PDF files
+  if (file.mimetype === 'application/pdf') {
+    cb(null, true);
+  } else {
+    cb(new Error('Only PDF files are allowed. Please upload a PDF file.'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: fileFilter,
+});
 
 // ==============================================================================
 // Middleware
@@ -394,6 +438,92 @@ app.post('/api/podcasts/generate/url', async (req: Request, res: Response) => {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to generate podcast',
     });
+  }
+});
+
+// Generate podcast from file (PDF upload)
+app.post('/api/podcasts/generate/file', upload.single('file'), async (req: Request, res: Response) => {
+  let uploadedFilePath: string | undefined;
+
+  try {
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded. Please upload a PDF file using the "file" field.',
+      });
+    }
+
+    uploadedFilePath = req.file.path;
+
+    // Extract options from request body
+    const { personaIds, preset, useDefaults, podcastTitle, targetLength, podcastStyle } = req.body;
+
+    // Resolve persona IDs using preset/defaults if not explicitly provided
+    const resolvedPersonaIds = await resolvePersonaIds({
+      personaIds: personaIds ? JSON.parse(personaIds) : undefined,
+      preset,
+      useDefaults: useDefaults === 'true' || useDefaults === true,
+    });
+
+    if (resolvedPersonaIds.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least 2 personas required. Provide personaIds, preset, or set useDefaults=true',
+      });
+    }
+
+    // Generate podcast from uploaded PDF
+    const result = await generatePodcastFromFile(uploadedFilePath, {
+      personaIds: resolvedPersonaIds,
+      podcastTitle: podcastTitle || path.basename(req.file.originalname, '.pdf'),
+      targetLength: targetLength ? parseInt(targetLength) : undefined,
+      podcastStyle: podcastStyle,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        podcast: result.podcast,
+        content: result.content,
+        status: result.status,
+        personasUsed: resolvedPersonaIds,
+        sourceFile: req.file.originalname,
+        jobs: {
+          factExtraction: result.jobs.factExtraction?.id,
+          dialogueGeneration: result.jobs.dialogueGeneration?.id,
+        },
+      },
+    });
+  } catch (error) {
+    // Handle multer-specific errors
+    if (error instanceof multer.MulterError) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          error: 'File too large. Maximum file size is 10MB.',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        error: `File upload error: ${error.message}`,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to generate podcast from file',
+    });
+  } finally {
+    // Clean up uploaded file
+    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
+      try {
+        fs.unlinkSync(uploadedFilePath);
+        console.log(`[API] Cleaned up temporary file: ${uploadedFilePath}`);
+      } catch (cleanupError) {
+        console.error(`[API] Failed to cleanup file ${uploadedFilePath}:`, cleanupError);
+      }
+    }
   }
 });
 

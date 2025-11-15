@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/server.ts",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/seed.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/seed",
+      "dest": "/api/seed.ts"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/server.ts"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/server.ts"
+    }
+  ],
+  "functions": {
+    "api/server.ts": {
+      "maxDuration": 60
+    },
+    "api/seed.ts": {
+      "maxDuration": 60
+    }
+  }
+}
